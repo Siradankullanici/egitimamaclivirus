@@ -1,53 +1,66 @@
-#include <windows.h>
+Ôªø#include <windows.h>
 #include <aclapi.h>
-#include <sddl.h>
 #include <iostream>
 
 void lockRegistryKey(const std::wstring& keyPath) {
-	HKEY hKey;
-	LONG result = RegOpenKeyExW(HKEY_LOCAL_MACHINE, keyPath.c_str(), 0, KEY_ALL_ACCESS, &hKey);
-	if (result != ERROR_SUCCESS) {
-		std::wcerr << L"Failed to open registry key: " << result << std::endl;
-		return;
-	}
-	// Yeni bir ACL olu˛tur
-	PACL pNewAcl = nullptr;
-	EXPLICIT_ACCESSW ea;
-	SID_IDENTIFIER_AUTHORITY SIDAuthWorld = SECURITY_WORLD_SID_AUTHORITY;
-	PSID pEveryoneSID = nullptr;
-	// Everyone SID'sini olu˛tur
-	if (!AllocateAndInitializeSid(&SIDAuthWorld, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &pEveryoneSID)) {
-		std::wcerr << L"Failed to create SID: " << GetLastError() << std::endl;
-		RegCloseKey(hKey);
-		return;
-	}
-	// Eri˛im haklar˝n˝ ayarla
-	ZeroMemory(&ea, sizeof(EXPLICIT_ACCESSW));
-	ea.grfAccessPermissions = KEY_READ; // Sadece okuma izni ver
-	ea.grfAccessMode = SET_ACCESS; // Mevcut izinleri dei˛tir
-	ea.grfInheritance = NO_INHERITANCE; // Alt anahtarlara izin verme
-	ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-	ea.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
-	ea.Trustee.ptstrName = (LPWSTR)pEveryoneSID;
-	// Yeni ACL'yi olu˛tur
-	result = SetEntriesInAclW(1, &ea, nullptr, &pNewAcl);
-	if (result != ERROR_SUCCESS) {
-		std::wcerr << L"Failed to set ACL: " << result << std::endl;
-		FreeSid(pEveryoneSID);
-		RegCloseKey(hKey);
-		return;
-	}
-	// Yeni ACL'yi anahtara uygula
-	result = SetNamedSecurityInfoW((LPWSTR)keyPath.c_str(), SE_REGISTRY_KEY, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, nullptr, nullptr, pNewAcl, nullptr);
-	if (result != ERROR_SUCCESS) {
-		std::wcerr
-			<< L"Failed to apply ACL: " << result << std::endl;
-	}
+    // SetNamedSecurityInfoW i√ßin "MACHINE\" prefix'i gerekli
+    std::wstring fullPath = L"MACHINE\\" + keyPath;
+
+    PSID pEveryoneSID = nullptr;
+    PACL pNewAcl = nullptr;
+
+    // Everyone SID olu≈ütur
+    SID_IDENTIFIER_AUTHORITY sidAuthWorld = SECURITY_WORLD_SID_AUTHORITY;
+    if (!AllocateAndInitializeSid(
+        &sidAuthWorld, 1,
+        SECURITY_WORLD_RID,
+        0, 0, 0, 0, 0, 0, 0,
+        &pEveryoneSID)) {
+        std::wcerr << L"SID olu≈üturulamadƒ±: " << GetLastError() << std::endl;
+        return;
+    }
+
+    // Eri≈üim kuralƒ±nƒ± tanƒ±mla (sadece okuma)
+    EXPLICIT_ACCESSW ea = {};
+    ea.grfAccessPermissions = KEY_READ;
+    ea.grfAccessMode = SET_ACCESS;
+    ea.grfInheritance = NO_INHERITANCE;
+    ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    ea.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+    ea.Trustee.ptstrName = reinterpret_cast<LPWSTR>(pEveryoneSID);
+
+    // Yeni ACL olu≈ütur
+    DWORD result = SetEntriesInAclW(1, &ea, nullptr, &pNewAcl);
+    if (result != ERROR_SUCCESS) {
+        std::wcerr << L"ACL olu≈üturulamadƒ±: " << result << std::endl;
+        FreeSid(pEveryoneSID);
+        return;
+    }
+
+    result = SetNamedSecurityInfoW(
+        const_cast<LPWSTR>(fullPath.c_str()),
+        SE_REGISTRY_KEY,
+        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        nullptr, nullptr,
+        pNewAcl,
+        nullptr
+    );
+
+    if (result != ERROR_SUCCESS) {
+        std::wcerr << L"ACL uygulanamadƒ±: " << result << std::endl;
+    }
+    else {
+        std::wcout << L"Ba≈üarƒ±yla kilitlendi." << std::endl;
+    }
+
+    LocalFree(pNewAcl);
+    FreeSid(pEveryoneSID);
 }
 
 int main() {
-	const std::wstring keyPath = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
-	// Registry anahtar˝n˝ kitle
-	lockRegistryKey(keyPath);
-	return 0;
+    const std::wstring keyPath =
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
+
+    lockRegistryKey(keyPath);
+    return 0;
 }
